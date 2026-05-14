@@ -1,6 +1,12 @@
 from playwright.sync_api import sync_playwright
 from save_to_db import save_ads_to_db
 from datetime import datetime
+from config import (
+    NUXEO_URL,
+    USERNAME,
+    PASSWORD
+)
+
 import pandas as pd
 import time
 import os
@@ -9,8 +15,6 @@ import json
 # ============================================
 # CONFIG
 # ============================================
-
-NUXEO_URL = "https://nuxeoprd.valpak.com/nuxeo/"
 
 TAB_NAMES = [
     "Materials Review",
@@ -109,7 +113,6 @@ def scrape_current_page(page):
             print(f"Tab: {ad_data['Tab']}")
             print(f"Ad: {ad_data['Ad']}")
             print(f"Advertiser: {ad_data['Advertiser']}")
-            print(f"Claimed By: {ad_data['Claimed By']}")
 
         except Exception as e:
 
@@ -295,38 +298,78 @@ def save_summary_json(incoming_ads, outgoing_ads):
         json.dump(summary, file, indent=4)
 
 # ============================================
+# AUTOMATED LOGIN
+# ============================================
+
+def login(page):
+
+    print("\nStarting automated login...")
+
+    page.goto(
+        NUXEO_URL,
+        timeout=60000
+    )
+
+    # WAIT USERNAME FIELD
+    page.wait_for_selector(
+        "input[type='text']",
+        timeout=60000
+    )
+
+    # USERNAME
+    page.fill(
+        "input[type='text']",
+        USERNAME
+    )
+
+    # PASSWORD
+    page.fill(
+        "input[type='password']",
+        PASSWORD
+    )
+
+    print("Credentials entered.")
+
+    # LOGIN BUTTON
+    page.click(
+        "button:has-text('Log In')"
+    )
+
+    print("Login button clicked.")
+
+    # WAIT DASHBOARD
+    page.wait_for_selector(
+        "text='Materials Review'",
+        timeout=120000
+    )
+
+    print("\nLogin successful.")
+
+    page.screenshot(
+        path="dashboard.png"
+    )
+
+# ============================================
 # MAIN PROGRAM
 # ============================================
 
 with sync_playwright() as p:
 
     browser = p.chromium.launch(
-        headless=False
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu"
+        ]
     )
 
     context = browser.new_context()
 
     page = context.new_page()
 
-    # OPEN NUXEO
-    page.goto(
-        NUXEO_URL,
-        timeout=60000
-    )
-
-    print("\nPlease login manually...")
-
-    # WAIT FOR LOGIN SUCCESS
-    page.wait_for_selector(
-        "text='Materials Review'",
-        timeout=300000
-    )
-
-    print("\nLogin successful.")
-
-    page.screenshot(
-        path="login_success.png"
-    )
+    # LOGIN
+    login(page)
 
     while True:
 
@@ -372,26 +415,6 @@ with sync_playwright() as p:
             print(f"OUTGOING ADS: {len(outgoing_ads)}")
             print("===================================")
 
-            for ad in incoming_ads:
-
-                print("\nNEW INCOMING AD")
-
-                print(
-                    f"{ad['Ad']} - "
-                    f"{ad['Advertiser']} - "
-                    f"{ad['Tab']}"
-                )
-
-            for ad in outgoing_ads:
-
-                print("\nOUTGOING AD")
-
-                print(
-                    f"{ad['Ad']} - "
-                    f"{ad['Advertiser']} - "
-                    f"{ad['Tab']}"
-                )
-
             save_current_ads()
 
             save_ads_to_db(all_ads)
@@ -411,19 +434,9 @@ with sync_playwright() as p:
 
             time.sleep(CHECK_INTERVAL)
 
-            print("\nReloading Nuxeo...")
+            print("\nRefreshing session...")
 
-            page.goto(
-                NUXEO_URL,
-                timeout=60000
-            )
-
-            page.wait_for_selector(
-                "text='Materials Review'",
-                timeout=300000
-            )
-
-            page.wait_for_timeout(5000)
+            login(page)
 
         except Exception as e:
 
