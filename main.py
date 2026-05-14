@@ -7,10 +7,8 @@ from config import (
     PASSWORD
 )
 
-import pandas as pd
-import time
-import os
 import json
+import os
 
 # ============================================
 # CONFIG
@@ -25,8 +23,6 @@ TAB_NAMES = [
     "In House Change",
     "Quality Control"
 ]
-
-CHECK_INTERVAL = 300  # 5 Minutes
 
 # ============================================
 # GLOBAL VARIABLES
@@ -60,7 +56,7 @@ def switch_tab(page, tab_name):
 
     tab.click()
 
-    page.wait_for_timeout(5000)
+    page.wait_for_timeout(3000)
 
 # ============================================
 # SCRAPE CURRENT PAGE
@@ -75,7 +71,6 @@ def scrape_current_page(page):
     print(f"\nAds in Current Page: {count}")
 
     if count == 0:
-        print("No ads found in this page.")
         return
 
     for i in range(count):
@@ -109,10 +104,7 @@ def scrape_current_page(page):
 
             all_ads.append(ad_data)
 
-            print("\n-------------------")
-            print(f"Tab: {ad_data['Tab']}")
-            print(f"Ad: {ad_data['Ad']}")
-            print(f"Advertiser: {ad_data['Advertiser']}")
+            print(f"Ad Found: {ad_data['Ad']}")
 
         except Exception as e:
 
@@ -124,15 +116,13 @@ def scrape_current_page(page):
 
 def scrape_all_pages(page):
 
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(2000)
 
     pagination = page.locator(
         "span[id*='_nav_top_status']"
     )
 
     if pagination.count() == 0:
-
-        print("\nNo pagination found.")
 
         scrape_current_page(page)
 
@@ -144,8 +134,6 @@ def scrape_all_pages(page):
 
             current_status = pagination.first.inner_text()
 
-            print(f"\nCURRENT PAGE STATUS: {current_status}")
-
             current_page = int(
                 current_status.split("/")[0]
             )
@@ -155,75 +143,27 @@ def scrape_all_pages(page):
             )
 
             print(
-                f"\n========== PAGE {current_page} OF {total_pages} =========="
+                f"\nPAGE {current_page} OF {total_pages}"
             )
 
-        except Exception as e:
-
-            print("Pagination read error:", e)
+        except Exception:
 
             scrape_current_page(page)
 
             break
 
-        page.wait_for_timeout(3000)
-
         scrape_current_page(page)
 
         if current_page >= total_pages:
-
-            print("\nLast page reached.")
             break
 
         next_button = page.locator(
             "input[alt='Next']"
         ).first
 
-        print("\nMoving to next page...")
-
         next_button.click()
 
-        for _ in range(20):
-
-            page.wait_for_timeout(1000)
-
-            try:
-
-                new_status = pagination.first.inner_text()
-
-                if new_status != current_status:
-
-                    print(f"\nPage changed: {new_status}")
-
-                    break
-
-            except:
-                pass
-
-# ============================================
-# SAVE TO EXCEL
-# ============================================
-
-def save_to_excel():
-
-    if len(all_ads) == 0:
-
-        print("No ads to save.")
-        return
-
-    df = pd.DataFrame(all_ads)
-
-    if not os.path.exists("reports"):
-        os.makedirs("reports")
-
-    file_name = datetime.now().strftime(
-        "reports/nuxeo_ads_%Y%m%d_%H%M%S.xlsx"
-    )
-
-    df.to_excel(file_name, index=False)
-
-    print(f"\nExcel report saved:")
-    print(file_name)
+        page.wait_for_timeout(3000)
 
 # ============================================
 # LOAD PREVIOUS ADS
@@ -290,7 +230,8 @@ def save_summary_json(incoming_ads, outgoing_ads):
         ),
         "total_ads": len(all_ads),
         "incoming_ads": len(incoming_ads),
-        "outgoing_ads": len(outgoing_ads)
+        "outgoing_ads": len(outgoing_ads),
+        "ads": all_ads
     }
 
     with open("results.json", "w") as file:
@@ -310,19 +251,16 @@ def login(page):
         timeout=60000
     )
 
-    # WAIT USERNAME FIELD
     page.wait_for_selector(
         "input[type='text']",
         timeout=60000
     )
 
-    # USERNAME
     page.fill(
         "input[type='text']",
         USERNAME
     )
 
-    # PASSWORD
     page.fill(
         "input[type='password']",
         PASSWORD
@@ -330,56 +268,54 @@ def login(page):
 
     print("Credentials entered.")
 
-    # LOGIN BUTTON
     page.click(
         "button:has-text('Log In')"
     )
 
     print("Login button clicked.")
 
-    # WAIT DASHBOARD
     page.wait_for_selector(
         "text='Materials Review'",
         timeout=120000
     )
 
-    print("\nLogin successful.")
-
-    page.screenshot(
-        path="dashboard.png"
-    )
+    print("Login successful.")
 
 # ============================================
-# MAIN PROGRAM
+# MAIN EXECUTION
 # ============================================
 
-with sync_playwright() as p:
+def run_monitor():
 
-    browser = p.chromium.launch(
-        headless=True,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu"
-        ]
-    )
+    global all_ads
 
-    context = browser.new_context()
+    all_ads.clear()
 
-    page = context.new_page()
+    with sync_playwright() as p:
 
-    # LOGIN
-    login(page)
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process",
+                "--disable-setuid-sandbox",
+                "--no-zygote"
+            ]
+        )
 
-    while True:
+        context = browser.new_context()
+
+        page = context.new_page()
 
         try:
 
-            all_ads.clear()
+            # LOGIN
+            login(page)
 
             print("\n===================================")
-            print("CHECKING ADS AT:")
-            print(datetime.now())
+            print("STARTING SCAN")
             print("===================================")
 
             for tab_name in TAB_NAMES:
@@ -392,15 +328,12 @@ with sync_playwright() as p:
 
                 except Exception as tab_error:
 
-                    print(
-                        f"\nError in tab {tab_name}:"
-                    )
+                    print(f"\nTAB ERROR: {tab_name}")
 
                     print(tab_error)
 
             print("\n===================================")
-            print("TOTAL ADS COLLECTED:")
-            print(len(all_ads))
+            print(f"TOTAL ADS: {len(all_ads)}")
             print("===================================")
 
             previous_ads = load_previous_ads()
@@ -410,46 +343,44 @@ with sync_playwright() as p:
                 all_ads
             )
 
-            print("\n===================================")
-            print(f"INCOMING ADS: {len(incoming_ads)}")
-            print(f"OUTGOING ADS: {len(outgoing_ads)}")
-            print("===================================")
+            print(f"Incoming Ads: {len(incoming_ads)}")
+            print(f"Outgoing Ads: {len(outgoing_ads)}")
 
             save_current_ads()
 
             save_ads_to_db(all_ads)
-
-            save_to_excel()
 
             save_summary_json(
                 incoming_ads,
                 outgoing_ads
             )
 
-            print("\n===================================")
-            print(
-                f"WAITING {CHECK_INTERVAL // 60} MINUTES..."
-            )
-            print("===================================\n")
+            result = {
+                "status": "success",
+                "total_ads": len(all_ads),
+                "incoming_ads": len(incoming_ads),
+                "outgoing_ads": len(outgoing_ads)
+            }
 
-            time.sleep(CHECK_INTERVAL)
+            browser.close()
 
-            print("\nRefreshing session...")
-
-            login(page)
+            return result
 
         except Exception as e:
 
-            print("\n===================================")
-            print("MAIN ERROR")
-            print("===================================")
+            browser.close()
 
-            print(e)
+            return {
+                "status": "error",
+                "message": str(e)
+            }
 
-            page.screenshot(
-                path="main_error.png"
-            )
+# ============================================
+# DIRECT RUN
+# ============================================
 
-            print("\nRetrying in 30 seconds...\n")
+if __name__ == "__main__":
 
-            time.sleep(30)
+    result = run_monitor()
+
+    print(result)
